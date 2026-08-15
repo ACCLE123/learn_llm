@@ -1,0 +1,14 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "data": "data/arithmetic/test.jsonl",
+  "device": "mps",
+  "examples": 500,
+  "correct": 95,
+  "accuracy": 0.19,
+  "format_valid": 468,
+  "format_valid_rate": 0.936,
+  "generation": {
+    "do_sample": false,
+    "max_new_tokens": 32
+  }
+}

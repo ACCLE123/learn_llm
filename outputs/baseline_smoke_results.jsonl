@@ -1,0 +1,2 @@
+{"id": "validation-000000", "prompt": "请计算下列算式。只输出 `<answer>整数</answer>`，不要解释。\n问题：21 × 863", "reference_answer": "18123", "model_response": "`<answer>17409</answer>`", "parsed_answer": "17409", "format_valid": true, "correct": false}
+{"id": "validation-000001", "prompt": "请计算下列算式。只输出 `<answer>整数</answer>`，不要解释。\n问题：4 × 261", "reference_answer": "1044", "model_response": "`<answer>984</answer>`", "parsed_answer": "984", "format_valid": true, "correct": false}

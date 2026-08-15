@@ -1,0 +1,24 @@
+{
+  "protocol": "single final held-out test evaluation",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "selected_checkpoint": "outputs/grpo_formal_v1/checkpoint-250",
+  "data": "data/arithmetic/test.jsonl",
+  "generation": {
+    "do_sample": false,
+    "max_new_tokens": 32,
+    "batch_size": 8
+  },
+  "grpo": {
+    "examples": 500,
+    "correct": 174,
+    "accuracy": 0.348,
+    "format_valid": 491,
+    "format_valid_rate": 0.982
+  },
+  "baseline": {
+    "accuracy": 0.19,
+    "format_valid_rate": 0.936
+  },
+  "absolute_accuracy_gain": 0.15799999999999997,
+  "absolute_format_valid_rate_gain": 0.04599999999999993
+}

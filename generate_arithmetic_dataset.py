@@ -130,6 +130,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("data/arithmetic"))
     parser.add_argument("--train-size", type=int, default=5_000)
     parser.add_argument("--validation-size", type=int, default=500)
+    parser.add_argument("--test-size", type=int, default=500)
     parser.add_argument("--min-digits", type=int, default=1)
     parser.add_argument("--max-digits", type=int, default=3)
     parser.add_argument(
@@ -144,8 +145,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.train_size < 1 or args.validation_size < 1:
-        raise ValueError("--train-size and --validation-size must both be positive.")
+    if min(args.train_size, args.validation_size, args.test_size) < 1:
+        raise ValueError("--train-size, --validation-size, and --test-size must all be positive.")
     if args.min_digits < 1 or args.max_digits < args.min_digits:
         raise ValueError("Digit bounds must satisfy 1 <= min-digits <= max-digits.")
 
@@ -169,9 +170,19 @@ def main() -> None:
         args.max_digits,
         excluded_keys={example_key(example) for example in train_examples},
     )
+    test_examples = generate_split(
+        rng,
+        "test",
+        args.test_size,
+        args.operations,
+        args.min_digits,
+        args.max_digits,
+        excluded_keys={example_key(example) for example in train_examples + validation_examples},
+    )
 
     write_jsonl(args.output_dir / "train.jsonl", train_examples)
     write_jsonl(args.output_dir / "validation.jsonl", validation_examples)
+    write_jsonl(args.output_dir / "test.jsonl", test_examples)
     config = vars(args).copy()
     config["output_dir"] = str(args.output_dir)
     (args.output_dir / "generation_config.json").write_text(
@@ -182,6 +193,7 @@ def main() -> None:
         f"Wrote {len(validation_examples)} validation examples to "
         f"{args.output_dir / 'validation.jsonl'}"
     )
+    print(f"Wrote {len(test_examples)} test examples to {args.output_dir / 'test.jsonl'}")
 
 
 if __name__ == "__main__":

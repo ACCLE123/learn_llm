@@ -1,0 +1,14 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "data": "data/arithmetic/validation.jsonl",
+  "device": "cpu",
+  "examples": 2,
+  "correct": 0,
+  "accuracy": 0.0,
+  "format_valid": 2,
+  "format_valid_rate": 1.0,
+  "generation": {
+    "do_sample": false,
+    "max_new_tokens": 32
+  }
+}
