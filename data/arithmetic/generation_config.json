@@ -1,0 +1,11 @@
+{
+  "output_dir": "data/arithmetic",
+  "train_size": 5000,
+  "validation_size": 500,
+  "min_digits": 1,
+  "max_digits": 3,
+  "operations": [
+    "multiply"
+  ],
+  "seed": 42
+}
