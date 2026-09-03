@@ -102,3 +102,34 @@ accuracy checkpoint before running the held-out test evaluation:
 ```bash
 conda run --no-capture-output -n llm python -u evaluate_grpo_checkpoints.py
 ```
+
+## SFT comparison experiment
+
+Run a LoRA SFT comparison with the same model, training split, LoRA rank,
+learning rate, warmup, and 1,250 optimizer updates as the GRPO run. The script
+trains only on standard answers and reads validation—not test—for evaluation.
+
+```bash
+conda run --no-capture-output -n llm python -u run_sft.py
+```
+
+## SFT→GRPO step ablation
+
+Continue the fixed SFT checkpoint with the same exact-answer GRPO reward. This
+run reads train and validation only; checkpoints at 100, 250, and 500 steps
+are selected on validation before any fresh test evaluation.
+
+```bash
+conda run --no-capture-output -n llm python -u run_sft_then_grpo.py
+```
+
+## Fresh final comparison
+
+The original test split has already been used for the GRPO result. To compare
+the fixed GRPO and SFT models rigorously, create a new disjoint `test_v2` and
+evaluate each model exactly once:
+
+```bash
+python3 generate_test_v2.py
+conda run --no-capture-output -n llm python -u evaluate_test_v2_comparison.py
+```

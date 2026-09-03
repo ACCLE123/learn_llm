@@ -1,0 +1,66 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "data": "data/arithmetic/validation.jsonl",
+  "test_data_read": false,
+  "generation": {
+    "do_sample": false,
+    "max_new_tokens": 32,
+    "batch_size": 8
+  },
+  "ranked_checkpoints": [
+    {
+      "checkpoint_step": 1250,
+      "checkpoint": "outputs/sft_formal_v1/checkpoint-1250",
+      "examples": 500,
+      "correct": 243,
+      "accuracy": 0.486,
+      "format_valid": 500,
+      "format_valid_rate": 1.0
+    },
+    {
+      "checkpoint_step": 500,
+      "checkpoint": "outputs/sft_formal_v1/checkpoint-500",
+      "examples": 500,
+      "correct": 240,
+      "accuracy": 0.48,
+      "format_valid": 500,
+      "format_valid_rate": 1.0
+    },
+    {
+      "checkpoint_step": 250,
+      "checkpoint": "outputs/sft_formal_v1/checkpoint-250",
+      "examples": 500,
+      "correct": 239,
+      "accuracy": 0.478,
+      "format_valid": 500,
+      "format_valid_rate": 1.0
+    },
+    {
+      "checkpoint_step": 1000,
+      "checkpoint": "outputs/sft_formal_v1/checkpoint-1000",
+      "examples": 500,
+      "correct": 238,
+      "accuracy": 0.476,
+      "format_valid": 500,
+      "format_valid_rate": 1.0
+    },
+    {
+      "checkpoint_step": 750,
+      "checkpoint": "outputs/sft_formal_v1/checkpoint-750",
+      "examples": 500,
+      "correct": 235,
+      "accuracy": 0.47,
+      "format_valid": 500,
+      "format_valid_rate": 1.0
+    }
+  ],
+  "selected_checkpoint": {
+    "checkpoint_step": 1250,
+    "checkpoint": "outputs/sft_formal_v1/checkpoint-1250",
+    "examples": 500,
+    "correct": 243,
+    "accuracy": 0.486,
+    "format_valid": 500,
+    "format_valid_rate": 1.0
+  }
+}

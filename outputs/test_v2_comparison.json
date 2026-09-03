@@ -1,0 +1,39 @@
+{
+  "protocol": "one-time fresh test_v2 comparison",
+  "data": "data/arithmetic/test_v2.jsonl",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "generation": {
+    "do_sample": false,
+    "max_new_tokens": 32,
+    "batch_size": 8
+  },
+  "results": {
+    "baseline": {
+      "examples": 500,
+      "correct": 110,
+      "accuracy": 0.22,
+      "format_valid": 480,
+      "format_valid_rate": 0.96
+    },
+    "grpo_checkpoint_250": {
+      "adapter": "outputs/grpo_formal_v1/checkpoint-250",
+      "examples": 500,
+      "correct": 191,
+      "accuracy": 0.382,
+      "format_valid": 497,
+      "format_valid_rate": 0.994
+    },
+    "sft_checkpoint_1250": {
+      "adapter": "outputs/sft_formal_v1/checkpoint-1250",
+      "examples": 500,
+      "correct": 251,
+      "accuracy": 0.502,
+      "format_valid": 498,
+      "format_valid_rate": 0.996
+    }
+  },
+  "accuracy_gains_over_baseline": {
+    "grpo_checkpoint_250": 0.162,
+    "sft_checkpoint_1250": 0.28200000000000003
+  }
+}
