@@ -36,7 +36,136 @@ def order_lookup() -> ToolSpec:
     )
 
 
+def tool(name: str, *, kind: str = "generic", description: str | None = None) -> ToolSpec:
+    return ToolSpec(
+        name=name,
+        description=description or name,
+        parameters={"type": "object", "properties": {}},
+        kind=kind,  # type: ignore[arg-type]
+    )
+
+
 class AgentCoreTests(unittest.TestCase):
+    def test_retrieves_a_small_schema_relevant_subset(self) -> None:
+        backend = ScriptedBackend([Generation(content="I will look it up.")])
+        agent = AgentCore(
+            backend,
+            [
+                tool("get_order", kind="read", description="Find order details by order id."),
+                tool("cancel_order", kind="write", description="Cancel an order."),
+                tool("list_catalog", kind="read", description="List product catalogue."),
+                tool("get_user", kind="read", description="Look up a customer profile."),
+                tool("return_items", kind="write", description="Return delivered items."),
+            ],
+            "Use tools for facts.",
+            candidate_tool_limit=2,
+        )
+        state = agent.get_init_state()
+
+        agent.generate_next_message(Message(role="user", content="Please find my order."), state)
+
+        _, visible_tools = backend.requests[0]
+        self.assertEqual(len(visible_tools), 2)
+        self.assertEqual(visible_tools[0].name, "get_order")
+        self.assertEqual(state.plans[-1].phase, "discover")
+
+    def test_blocks_write_before_confirmation(self) -> None:
+        backend = ScriptedBackend(
+            [Generation(tool_calls=(ToolCall(name="change_record", arguments={}),))]
+        )
+        agent = AgentCore(backend, [tool("change_record", kind="write")], "Ask first.")
+        state = agent.get_init_state()
+
+        turn = agent.generate_next_message(Message(role="user", content="Change my record."), state)
+
+        self.assertEqual(turn.assistant_message.tool_calls, ())
+        self.assertIn("confirmation", turn.rejected_calls[0].reason)
+
+    def test_allows_confirmed_write_then_enters_verify_phase(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(content="Please confirm that you want to proceed."),
+                Generation(tool_calls=(ToolCall(name="change_record", arguments={}),)),
+                Generation(tool_calls=(ToolCall(name="get_record", arguments={}),)),
+            ]
+        )
+        agent = AgentCore(
+            backend,
+            [tool("change_record", kind="write"), tool("get_record", kind="read")],
+            "Ask first.",
+        )
+        state = agent.get_init_state()
+
+        agent.generate_next_message(Message(role="user", content="Change my record."), state)
+        write_turn = agent.generate_next_message(Message(role="user", content="Yes, proceed."), state)
+        self.assertEqual(write_turn.assistant_message.tool_calls[0].name, "change_record")
+        verify_turn = agent.generate_next_message(
+            Message(role="tool", content="updated", tool_call_id="call_2_1"), state
+        )
+
+        self.assertEqual(state.plans[-1].phase, "verify")
+        _, visible_tools = backend.requests[-1]
+        self.assertEqual([tool.name for tool in visible_tools], ["get_record"])
+        self.assertEqual(verify_turn.assistant_message.tool_calls[0].name, "get_record")
+
+    def test_retries_verification_when_model_claims_completion_without_a_read(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(content="Please confirm that you want to proceed."),
+                Generation(tool_calls=(ToolCall(name="change_record", arguments={}),)),
+                Generation(content="The record has been updated."),
+                Generation(tool_calls=(ToolCall(name="get_record", arguments={}),)),
+            ]
+        )
+        agent = AgentCore(
+            backend,
+            [tool("change_record", kind="write"), tool("get_record", kind="read")],
+            "Ask first.",
+        )
+        state = agent.get_init_state()
+
+        agent.generate_next_message(Message(role="user", content="Change my record."), state)
+        agent.generate_next_message(Message(role="user", content="Yes, proceed."), state)
+        verify_turn = agent.generate_next_message(
+            Message(role="tool", content="updated", tool_call_id="call_2_1"), state
+        )
+
+        self.assertEqual(verify_turn.assistant_message.tool_calls[0].name, "get_record")
+        self.assertEqual(len(backend.requests), 4)
+        retry_prompt, retry_tools = backend.requests[-1]
+        self.assertIn("not yet verified", retry_prompt[-1].content)
+        self.assertEqual([candidate.name for candidate in retry_tools], ["get_record"])
+
+    def test_retries_verification_after_an_invalid_tool_call(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(content="Please confirm that you want to proceed."),
+                Generation(tool_calls=(ToolCall(name="change_record", arguments={}),)),
+                Generation(content="The record has been updated."),
+                Generation(tool_calls=(ToolCall(name="get_records", arguments={}),)),
+                Generation(tool_calls=(ToolCall(name="get_record", arguments={}),)),
+            ]
+        )
+        agent = AgentCore(
+            backend,
+            [tool("change_record", kind="write"), tool("get_record", kind="read")],
+            "Ask first.",
+        )
+        state = agent.get_init_state()
+
+        agent.generate_next_message(Message(role="user", content="Change my record."), state)
+        agent.generate_next_message(Message(role="user", content="Yes, proceed."), state)
+        verify_turn = agent.generate_next_message(
+            Message(role="tool", content="updated", tool_call_id="call_2_1"), state
+        )
+
+        self.assertEqual(verify_turn.assistant_message.tool_calls[0].name, "get_record")
+        self.assertEqual(len(backend.requests), 5)
+        repair_prompt, repair_tools = backend.requests[-1]
+        self.assertIn("get_records", repair_prompt[-1].content)
+        self.assertIn("get_record", repair_prompt[-1].content)
+        self.assertEqual([candidate.name for candidate in repair_tools], ["get_record"])
+
     def test_records_policy_history_and_valid_tool_call(self) -> None:
         backend = ScriptedBackend(
             [Generation(tool_calls=(ToolCall(name="get_order", arguments={"order_id": "o-1"}),))]
@@ -66,7 +195,7 @@ class AgentCoreTests(unittest.TestCase):
 
         self.assertEqual(turn.assistant_message.tool_calls, ())
         self.assertEqual(turn.rejected_calls[0].reason, "Unknown tool name.")
-        self.assertIn("could not form", turn.assistant_message.content)
+        self.assertIn("valid available tool", turn.assistant_message.content)
 
     def test_turn_limit_stops_unbounded_loop(self) -> None:
         backend = ScriptedBackend([Generation(content="I need more information.")])
@@ -145,6 +274,13 @@ class AgentCoreTests(unittest.TestCase):
                                     "options": {"switch": "linear"},
                                 }
                             ],
+                            "payment_history": [
+                                {
+                                    "transaction_type": "payment",
+                                    "payment_method_id": "credit_card_123",
+                                    "amount": 10,
+                                }
+                            ],
                         }
                     ),
                     tool_call_id="call_1_1",
@@ -157,6 +293,7 @@ class AgentCoreTests(unittest.TestCase):
         prompt, _ = backend.requests[0]
         self.assertLessEqual(len(prompt[-3].content), agent.MAX_ASSISTANT_CONTEXT_CHARS + 40)
         self.assertIn('"product_id":"p-1"', prompt[-2].content)
+        self.assertIn('"payment_method_id":"credit_card_123"', prompt[-2].content)
         self.assertNotIn("address1", prompt[-2].content)
         self.assertEqual(len(state.messages[0].content), 500)
 

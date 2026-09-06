@@ -27,11 +27,11 @@ from .backend import (
     ToolCallParseError,
     TransformersQwenBackend,
 )
-from .models import Message, ToolCall, ToolSpec
+from .models import Message, ToolCall, ToolKind, ToolSpec
 
 
 def tool_specs_from_tau2(tools: Iterable[Tool]) -> list[ToolSpec]:
-    """Convert τ²'s executable tools into model-visible JSON schemas."""
+    """Convert τ² tools into schemas with their declared workflow metadata."""
 
     specs: list[ToolSpec] = []
     for tool in tools:
@@ -41,9 +41,25 @@ def tool_specs_from_tau2(tools: Iterable[Tool]) -> list[ToolSpec]:
                 name=function["name"],
                 description=function.get("description", ""),
                 parameters=function["parameters"],
+                kind=tool_kind_from_tau2(tool),
             )
         )
     return specs
+
+
+def tool_kind_from_tau2(tool: Tool) -> ToolKind:
+    """Read τ²'s declared tool type, with a schema-name fallback for adapters."""
+
+    declared = getattr(getattr(tool, "_func", None), "__tool_type__", None)
+    value = getattr(declared, "value", declared)
+    if value in {"read", "write", "think", "generic"}:
+        return value
+    name = tool.name.lower()
+    if name.startswith(("get_", "find_", "list_", "search_", "check_")):
+        return "read"
+    if name.startswith(("create_", "update_", "modify_", "cancel_", "return_", "exchange_")):
+        return "write"
+    return "generic"
 
 
 def _core_tool_calls(message: AssistantMessage) -> tuple[ToolCall, ...]:
@@ -111,6 +127,7 @@ class Tau2QwenAgent(HalfDuplexAgent[AgentState]):
         backend: ModelBackend,
         *,
         max_decisions: int = 12,
+        candidate_tool_limit: int = 4,
     ) -> None:
         super().__init__(tools=tools, domain_policy=domain_policy)
         self.core = AgentCore(
@@ -118,6 +135,7 @@ class Tau2QwenAgent(HalfDuplexAgent[AgentState]):
             tools=tool_specs_from_tau2(tools),
             domain_policy=domain_policy,
             max_decisions=max_decisions,
+            candidate_tool_limit=candidate_tool_limit,
         )
 
     def get_init_state(
@@ -182,4 +200,5 @@ def create_tau2_qwen_agent(tools: list[Tool], domain_policy: str, **kwargs: Any)
         domain_policy=domain_policy,
         backend=backend,
         max_decisions=kwargs.get("max_decisions", 12),
+        candidate_tool_limit=kwargs.get("candidate_tool_limit", 4),
     )

@@ -1,6 +1,6 @@
 # Qwen3 Retail Tool Agent
 
-This is a separate project for building a local `Qwen3-4B` tool-calling agent
+This is a separate project for building a local `Qwen3-1.7B` tool-calling agent
 for the text-based Retail domain in `tau2-bench` (the current repository that
 hosts the τ² benchmark).
 
@@ -9,11 +9,11 @@ adding reinforcement learning:
 
 ```text
 user or tool message
-  -> agent state (policy + tool schema + history)
-  -> Qwen backend
-  -> assistant text or typed tool call
-  -> tau2 environment
-  -> next tool/user message
+  -> Observe: compact tool-attributed facts
+  -> Plan: retrieve a small relevant tool subset from schemas
+  -> Act: Qwen chooses text or a typed tool call
+  -> Verify: require a read after a successful write
+  -> τ² environment -> next tool/user message
 ```
 
 ## Scope
@@ -21,16 +21,20 @@ user or tool message
 ### Phase 0/1 — current work
 
 - Keep a complete typed conversation and tool-call state.
-- Inject the domain policy and available tool schemas into the model context.
+- Inject the domain policy and only the schema-retrieved candidate tools into
+  the model context.
 - Use a pluggable backend: the included backend targets a locally loaded Qwen
   model, while tests use a deterministic fake backend.
 - Validate tool names and arguments before an environment receives a call.
+- Classify τ² tools as read/write/think/generic from their declared metadata.
+- Require explicit confirmation before write actions and a read-only verify
+  phase after them.
 - Stop safely at a configured turn limit and expose each step for tracing.
 
 ### Later phases
 
 1. Implement the τ² `HalfDuplexAgent` adapter and validate it on `mock`.
-2. Run a frozen Qwen3-4B baseline on a small Retail development subset.
+2. Run a frozen Qwen3-1.7B baseline on a small Retail development subset.
 3. Add trajectory logging, evaluation reports, and failure classification.
 4. Treat a complete Retail interaction as one rollout and extend
    `mini_grpo` with trajectory GRPO.
@@ -42,6 +46,30 @@ business authority: the environment/workflow owns schema validation,
 permissions, policy enforcement, execution, and audit logs. The agent core
 therefore avoids guessing tool results or repairing malformed calls into a
 different semantic action.
+
+## Agent variants and experiment protocol
+
+`baselines/pure_qwen_v0.json` freezes the historical all-tools Qwen3-4B result:
+the first five official Retail train tasks scored `0/5`, with the exact model,
+runtime, evaluator, and decoding configuration recorded. Do not overwrite that
+file. The primary experiment model is Qwen3-1.7B; retain Qwen3-4B only for a
+later migration check of the best 1.7B agent workflow.
+
+The current agent is a generic `Plan-Act-Observe-Verify` workflow, not a
+task-specific script:
+
+1. Tool schemas and τ² metadata are converted into read/write/think/generic
+   specs.
+2. A lexical retriever selects the top candidate schemas for the current user
+   request and recent observations.
+3. Qwen plans and acts only within that candidate set.
+4. Environment results become compact observations.
+5. Writes require explicit confirmation; their next decision is restricted to
+   read tools for verification.
+
+The workflow never contains task IDs, product names, order formats, or desired
+benchmark actions. This makes it suitable for comparisons across Retail task
+types and later trajectory GRPO.
 
 ## Local setup
 
@@ -70,15 +98,16 @@ Run the real Qwen smoke test after the deterministic check passes:
 
 ```bash
 # Download once in a normal terminal; it can take a while on a slow network.
-hf download Qwen/Qwen3-4B --local-dir models/Qwen3-4B
+hf download Qwen/Qwen3-1.7B --local-dir models/Qwen3-1.7B
 
 # Then run with the local checkpoint.
-PYTHONPATH=src python scripts/run_qwen_mock.py --model models/Qwen3-4B
+PYTHONPATH=src python scripts/run_qwen_mock.py --model models/Qwen3-1.7B
 ```
 
-The first run downloads approximately 8.04 GB of model weights. The backend
-uses CUDA when available and otherwise moves to MPS when PyTorch exposes it;
-CPU remains a functional but slow fallback.
+The backend uses CUDA when available and otherwise moves to MPS when PyTorch
+exposes it; CPU remains a functional but slow fallback. Qwen3-1.7B is the
+default because it enables faster local iteration. Keep decoding limits fixed
+when comparing agent variants.
 
 ## Retail development baseline
 
@@ -96,13 +125,41 @@ the LiteLLM provider behind the explicitly supplied user model. With DeepSeek:
 ```bash
 export DEEPSEEK_API_KEY="your_api_key"
 PYTHONPATH=src python scripts/run_retail_baseline.py \
-  --model models/Qwen3-4B \
-  --user-llm deepseek/deepseek-chat
+  --model models/Qwen3-1.7B \
+  --user-llm deepseek/deepseek-chat \
+  --judge-llm deepseek/deepseek-chat \
+  --candidate-tools 4
 ```
 
+`--user-llm` simulates the customer. `--judge-llm` evaluates tasks that contain
+natural-language assertions; τ² otherwise defaults that independent evaluator
+to OpenAI.
+
 Each task's sanitized τ² simulation, raw Qwen completions, reward, duration,
-and tool-result errors are written to a timestamped directory below
-`artifacts/retail_baseline/`.
+tool-result errors, workflow plans, observations, and a `failure_report.json`
+are written to a timestamped directory below `artifacts/retail_baseline/`.
+
+Analyze any completed run across all of its task types:
+
+```bash
+PYTHONPATH=src python scripts/analyze_retail_failures.py \
+  artifacts/retail_baseline/<timestamp>
+```
+
+The report has non-exclusive labels such as generation stop, no tool action,
+tool execution error, environment-goal failure, and communication failure.
+
+For workflow development, avoid repeatedly tuning only the leading tasks. This
+selects a reproducible train subset that maximizes coverage of distinct τ²
+evaluation action names:
+
+```bash
+PYTHONPATH=src python scripts/run_retail_baseline.py \
+  --split train --selection diverse --limit 8 --dry-run
+```
+
+Pass the displayed IDs back with `--task-ids id1,id2,...` to freeze a specific
+mixed task set for an experiment.
 
 Qwen thinking is disabled by default so tool calls arrive promptly. Add
 `--enable-thinking` only when deliberately comparing a reasoning-enabled run.

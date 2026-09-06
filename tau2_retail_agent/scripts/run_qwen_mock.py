@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Qwen3-4B through one τ² mock task using real model inference."""
+"""Run the primary local Qwen checkpoint through one τ² mock task."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from tau2_retail_agent.tau2_adapter import Tau2QwenAgent
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="Qwen/Qwen3-4B")
+    parser.add_argument("--model", default="models/Qwen3-1.7B")
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--max-generation-seconds", type=float, default=90.0)
     parser.add_argument("--max-decisions", type=int, default=4)
@@ -30,6 +30,20 @@ def serialize_tool_result(result: object) -> str:
     if hasattr(result, "__dataclass_fields__"):
         return json.dumps(asdict(result), ensure_ascii=False, default=str)
     return json.dumps(result, ensure_ascii=False, default=str)
+
+
+def print_trace(trace: list[dict[str, object]], state: object) -> None:
+    print(
+        json.dumps(
+            {
+                "trace": trace,
+                "raw_model_generations": getattr(state, "raw_generations", []),
+                "workflow_plans": [asdict(plan) for plan in getattr(state, "plans", [])],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def main() -> None:
@@ -54,6 +68,7 @@ def main() -> None:
         "Please create an Important Meeting task for user_1."
     )
     trace: list[dict[str, object]] = []
+    confirmation_sent = False
 
     for _ in range(args.max_decisions):
         response, state = agent.generate_next_message(incoming, state)
@@ -64,7 +79,11 @@ def main() -> None:
             }
         )
         if not response.tool_calls:
-            print(json.dumps({"trace": trace}, ensure_ascii=False, indent=2))
+            if state.awaiting_confirmation and not confirmation_sent:
+                confirmation_sent = True
+                incoming = UserMessage.text("Yes, please proceed with creating the task.")
+                continue
+            print_trace(trace, state)
             return
 
         results: list[ToolMessage] = []

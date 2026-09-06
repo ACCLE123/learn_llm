@@ -1,0 +1,27 @@
+{
+  "baseline_id": "pure-qwen-v0",
+  "purpose": "Frozen pre-workflow baseline for later agent comparisons.",
+  "source_run_dir": "artifacts/retail_baseline/20260906_133038",
+  "timestamp_local": "2026-09-06T13:30:38",
+  "agent_architecture": "pure_qwen_all_tools",
+  "model": "Qwen3-4B loaded from models/Qwen3-4B",
+  "device": "mps:0",
+  "user_llm": "deepseek/deepseek-chat",
+  "judge_llm": "deepseek/deepseek-chat",
+  "task_split": "train",
+  "task_ids": ["0", "1", "2", "3", "4"],
+  "decode": {
+    "max_new_tokens": 128,
+    "max_generation_seconds": 60,
+    "max_decisions": 16,
+    "max_steps": 32,
+    "timeout_seconds": 900
+  },
+  "results": {
+    "tasks_completed": 5,
+    "mean_reward": 0.0,
+    "success_rate": 0.0,
+    "total_tool_result_errors": 1
+  },
+  "note": "Recorded before the generic workflow refactor. Keep this configuration immutable when comparing later versions."
+}

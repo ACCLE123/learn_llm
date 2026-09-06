@@ -22,7 +22,7 @@ from tau2_retail_agent.tau2_adapter import tool_specs_from_tau2
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="models/Qwen3-4B")
+    parser.add_argument("--model", default="models/Qwen3-1.7B")
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--max-generation-seconds", type=float, default=60.0)
     parser.add_argument(

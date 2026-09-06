@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 
 MessageRole = Literal["system", "user", "assistant", "tool"]
+ToolKind = Literal["read", "write", "think", "generic"]
+WorkflowPhase = Literal["discover", "act", "verify"]
 
 
 @dataclass(frozen=True)
@@ -16,6 +18,7 @@ class ToolSpec:
     name: str
     description: str
     parameters: dict[str, Any]
+    kind: ToolKind = "generic"
 
     def as_schema(self) -> dict[str, Any]:
         return {
@@ -72,6 +75,26 @@ class AgentTurn:
     rejected_calls: tuple[ToolValidationError, ...] = ()
 
 
+@dataclass(frozen=True)
+class Observation:
+    """A compact, tool-attributed fact returned by the environment."""
+
+    tool_name: str | None
+    tool_kind: ToolKind
+    success: bool
+    summary: str
+
+
+@dataclass(frozen=True)
+class WorkflowPlan:
+    """Private plan for one agent decision; it is never shown to the user."""
+
+    phase: WorkflowPhase
+    candidate_tools: tuple[str, ...]
+    requires_confirmation: bool
+    observation_count: int
+
+
 @dataclass
 class AgentState:
     """Mutable state that must survive user and tool messages between turns."""
@@ -81,6 +104,10 @@ class AgentState:
     decisions: int = 0
     terminated: bool = False
     raw_generations: list[str] = field(default_factory=list)
+    observations: list[Observation] = field(default_factory=list)
+    plans: list[WorkflowPlan] = field(default_factory=list)
+    awaiting_confirmation: bool = False
+    verification_required: bool = False
 
     @property
     def history(self) -> list[Message]:
