@@ -1,0 +1,31 @@
+{
+  "name": "Qwen3-1.7B PAOV-v1 evidence/recovery Retail development baseline",
+  "timestamp_local": "2026-09-06T17:32:45",
+  "source_run_dir": "artifacts/retail_baseline/20260906_173245",
+  "model": "Qwen/Qwen3-1.7B loaded from models/Qwen3-1.7B",
+  "device": "mps:0",
+  "agent_architecture": "paov_v1_evidence_recovery",
+  "candidate_tools": 4,
+  "split": "train",
+  "seed": 42,
+  "task_ids": ["0", "1", "2", "3", "10", "21", "22", "54"],
+  "user_llm": "deepseek/deepseek-chat",
+  "judge_llm": "deepseek/deepseek-chat",
+  "max_new_tokens": 128,
+  "max_generation_seconds": 60,
+  "max_decisions": 16,
+  "max_steps": 32,
+  "reported_mean_reward": 0.125,
+  "reported_success_rate": 0.125,
+  "behavioral_success_rate": 0.0,
+  "tool_result_errors": 16,
+  "termination_counts": {
+    "max_steps": 6,
+    "user_stop": 2
+  },
+  "notes": [
+    "This is the fixed eight-task PAOV-v1 comparison after evidence and recovery controls.",
+    "It reduced tool-result errors from 29 in PAOV-v0 to 16, without improving the reported or behavioral success rate.",
+    "PAOV-v2 structured planning must be evaluated separately; this file is immutable baseline metadata."
+  ]
+}

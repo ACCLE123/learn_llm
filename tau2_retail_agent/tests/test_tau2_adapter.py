@@ -24,6 +24,11 @@ class ScriptedBackend:
         self.generations = list(generations)
 
     def generate(self, messages, tools):
+        if any(
+            message.role == "system" and "private planner" in message.content.lower()
+            for message in messages
+        ):
+            return Generation(content='{"mode":"read","missing_facts":["order"]}')
         return self.generations.pop(0)
 
 

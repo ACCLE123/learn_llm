@@ -128,6 +128,7 @@ class Tau2QwenAgent(HalfDuplexAgent[AgentState]):
         *,
         max_decisions: int = 12,
         candidate_tool_limit: int = 4,
+        enable_structured_planning: bool = True,
     ) -> None:
         super().__init__(tools=tools, domain_policy=domain_policy)
         self.core = AgentCore(
@@ -136,6 +137,7 @@ class Tau2QwenAgent(HalfDuplexAgent[AgentState]):
             domain_policy=domain_policy,
             max_decisions=max_decisions,
             candidate_tool_limit=candidate_tool_limit,
+            enable_structured_planning=enable_structured_planning,
         )
 
     def get_init_state(
@@ -201,4 +203,5 @@ def create_tau2_qwen_agent(tools: list[Tool], domain_policy: str, **kwargs: Any)
         backend=backend,
         max_decisions=kwargs.get("max_decisions", 12),
         candidate_tool_limit=kwargs.get("candidate_tool_limit", 4),
+        enable_structured_planning=kwargs.get("enable_structured_planning", True),
     )

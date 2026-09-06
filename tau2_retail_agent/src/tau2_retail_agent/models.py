@@ -9,6 +9,7 @@ from typing import Any, Literal
 MessageRole = Literal["system", "user", "assistant", "tool"]
 ToolKind = Literal["read", "write", "think", "generic"]
 WorkflowPhase = Literal["discover", "act", "verify", "recover"]
+PlanningMode = Literal["read", "propose"]
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,16 @@ class WorkflowPlan:
     observation_count: int
 
 
+@dataclass(frozen=True)
+class StructuredPlan:
+    """A compact private plan generated before an unconstrained action turn."""
+
+    mode: PlanningMode
+    missing_facts: tuple[str, ...]
+    raw_content: str
+    valid: bool
+
+
 @dataclass
 class AgentState:
     """Mutable state that must survive user and tool messages between turns."""
@@ -106,6 +117,7 @@ class AgentState:
     raw_generations: list[str] = field(default_factory=list)
     observations: list[Observation] = field(default_factory=list)
     plans: list[WorkflowPlan] = field(default_factory=list)
+    structured_plans: list[StructuredPlan] = field(default_factory=list)
     awaiting_confirmation: bool = False
     verification_required: bool = False
     recovery_required: bool = False

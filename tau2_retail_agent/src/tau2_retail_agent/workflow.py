@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from .models import AgentState, ToolKind, ToolSpec, WorkflowPlan
+from .models import AgentState, PlanningMode, ToolKind, ToolSpec, WorkflowPlan
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 
@@ -61,13 +61,19 @@ class PlanActObserveVerify:
         self.retriever = ToolRetriever(self.tools)
         self.candidate_limit = candidate_limit
 
-    def plan(self, state: AgentState) -> tuple[WorkflowPlan, tuple[ToolSpec, ...]]:
-        phase = self._phase(state)
+    def plan(
+        self, state: AgentState, *, discovery_mode: PlanningMode | None = None
+    ) -> tuple[WorkflowPlan, tuple[ToolSpec, ...]]:
+        phase = self.phase(state)
         read_tools = tuple(tool for tool in self.tools if tool.kind == "read")
         if phase in {"verify", "recover"}:
             # A tool agent must not fall back to write tools when verification
             # or error recovery has no read capability.
             visible_tools = read_tools
+        elif phase == "discover" and discovery_mode == "read":
+            visible_tools = read_tools
+        elif phase == "discover" and discovery_mode == "propose":
+            visible_tools = self.retriever.select(self._query(state), limit=self.candidate_limit)
         elif phase == "discover" and self._has_successful_read(state):
             # Evidence collection and recovery favor recall over lexical Top-K
             # precision. A read-only schema set cannot mutate the environment.
@@ -83,7 +89,7 @@ class PlanActObserveVerify:
         return plan, visible_tools
 
     @staticmethod
-    def _phase(state: AgentState) -> WorkflowPhase:
+    def phase(state: AgentState) -> WorkflowPhase:
         if state.verification_required:
             return "verify"
         if state.recovery_required:

@@ -10,7 +10,7 @@ adding reinforcement learning:
 ```text
 user or tool message
   -> Observe: compact tool-attributed facts
-  -> Plan: retrieve a relevant tool subset from schemas
+  -> Plan: private typed decision (read/propose) plus schema retrieval
   -> Act: Qwen chooses text or a typed tool call
   -> Verify: require a read after a successful write
   -> Recover: inspect facts after an error before another write
@@ -32,6 +32,8 @@ user or tool message
   after one write decision, and use a read-only verify phase after success.
 - Require write arguments to be grounded in user input or successful tool
   observations; errors enter a read-only recovery phase.
+- Use a compact, private structured plan during discovery so a small model can
+  decide whether it must gather evidence or can safely formulate a proposal.
 - Stop safely at a configured turn limit and expose each step for tracing.
 
 ### Later phases
@@ -64,19 +66,27 @@ its conservative behavioral-success rate was `0/8` because the reward-success
 trajectory still contained tool errors. This distinction is retained in all
 new reports.
 
-The current agent is a generic `Plan-Act-Observe-Verify` workflow, not a
-task-specific script:
+`baselines/qwen3_1.7b_paov_v1.json` freezes the same eight tasks after the
+evidence and recovery controls were added. It retains the same `1/8` reported
+reward and `0/8` behavioral success, but lowers environment tool-result errors
+from 29 to 16. This is a safety-control comparison, not evidence of better
+task completion.
 
-1. Tool schemas and τ² metadata are converted into read/write/think/generic
+The default agent is generic `PAOV-v2`, not a task-specific script:
+
+1. In normal discovery, Qwen first returns a private JSON plan containing
+   `mode: read|propose` and `missing_facts`. Invalid JSON fails closed to
+   `read`; no plan text is shown to the user.
+2. Tool schemas and τ² metadata are converted into read/write/think/generic
    specs.
-2. Initial action selection uses schema retrieval; after a successful read,
-   evidence collection exposes all read-only schemas to avoid lexical Top-K
-   omissions.
-3. Writes require user confirmation and arguments whose values appear in the
+3. `read` exposes every read-only schema; `propose` uses schema retrieval.
+   After a successful read, evidence collection also exposes every read-only
+   schema to avoid lexical Top-K omissions.
+4. Writes require user confirmation and arguments whose values appear in the
    user request or a successful observation.
-4. A write consumes its confirmation. Successful writes enter Verify; failed
+5. A write consumes its confirmation. Successful writes enter Verify; failed
    reads or writes enter Recover, where only read tools are exposed.
-5. Verify and Recover fail closed when no read tool exists; they never fall
+6. Verify and Recover fail closed when no read tool exists; they never fall
    back to a state-changing tool.
 
 The workflow never contains task IDs, product names, order formats, or desired
@@ -150,6 +160,11 @@ to OpenAI.
 Each task's sanitized τ² simulation, raw Qwen completions, reward, duration,
 tool-result errors, workflow plans, observations, and a `failure_report.json`
 are written to a timestamped directory below `artifacts/retail_baseline/`.
+
+PAOV-v2 structured planning is enabled by default. To run the exact PAOV-v1
+ablation for a controlled comparison, add `--disable-structured-planning`.
+Each artifact records private `workflow.structured_plans` in addition to
+action plans and observations; planner output is never shown to the user.
 
 Analyze any completed run across all of its task types:
 

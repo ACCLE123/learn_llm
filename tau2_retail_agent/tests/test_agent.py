@@ -69,6 +69,50 @@ class AgentCoreTests(unittest.TestCase):
         self.assertEqual(visible_tools[0].name, "get_order")
         self.assertEqual(state.plans[-1].phase, "discover")
 
+    def test_structured_planner_uses_read_mode_before_an_action(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(content='{"mode":"read","missing_facts":["order status"]}'),
+                Generation(tool_calls=(ToolCall(name="get_order", arguments={}),)),
+            ]
+        )
+        agent = AgentCore(
+            backend,
+            [tool("get_order", kind="read"), tool("change_record", kind="write")],
+            "Use tools for facts.",
+            enable_structured_planning=True,
+        )
+        state = agent.get_init_state()
+
+        turn = agent.generate_next_message(Message(role="user", content="Find my order."), state)
+
+        self.assertEqual(turn.assistant_message.tool_calls[0].name, "get_order")
+        self.assertEqual(state.structured_plans[-1].mode, "read")
+        self.assertTrue(state.structured_plans[-1].valid)
+        _, visible_tools = backend.requests[-1]
+        self.assertEqual([candidate.name for candidate in visible_tools], ["get_order"])
+
+    def test_invalid_structured_plan_falls_back_to_read_mode(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(content="I need more information."),
+                Generation(tool_calls=(ToolCall(name="get_order", arguments={}),)),
+            ]
+        )
+        agent = AgentCore(
+            backend,
+            [tool("get_order", kind="read"), tool("change_record", kind="write")],
+            "Use tools for facts.",
+            enable_structured_planning=True,
+        )
+        state = agent.get_init_state()
+
+        turn = agent.generate_next_message(Message(role="user", content="Find my order."), state)
+
+        self.assertEqual(turn.assistant_message.tool_calls[0].name, "get_order")
+        self.assertFalse(state.structured_plans[-1].valid)
+        self.assertEqual(state.structured_plans[-1].mode, "read")
+
     def test_blocks_write_before_confirmation(self) -> None:
         backend = ScriptedBackend(
             [Generation(tool_calls=(ToolCall(name="change_record", arguments={}),))]

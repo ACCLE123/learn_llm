@@ -12,6 +12,7 @@ from .models import (
     Generation,
     Message,
     Observation,
+    StructuredPlan,
     ToolCall,
     ToolSpec,
     ToolValidationError,
@@ -45,6 +46,7 @@ class AgentCore:
         *,
         max_decisions: int = 12,
         candidate_tool_limit: int = 4,
+        enable_structured_planning: bool = False,
     ) -> None:
         if max_decisions < 1:
             raise ValueError("max_decisions must be at least one.")
@@ -55,6 +57,7 @@ class AgentCore:
             raise ValueError("Tool names must be unique.")
         self.domain_policy = domain_policy
         self.max_decisions = max_decisions
+        self.enable_structured_planning = enable_structured_planning
         self.workflow = PlanActObserveVerify(self.tools, candidate_limit=candidate_tool_limit)
 
     def get_init_state(self, message_history: Iterable[Message] = ()) -> AgentState:
@@ -98,9 +101,13 @@ class AgentCore:
 
         state.messages.extend(incoming)
         self._record_observations(incoming, state)
-        plan, visible_tools = self.workflow.plan(state)
+        structured_plan = self._make_structured_plan(state)
+        discovery_mode = structured_plan.mode if structured_plan else None
+        plan, visible_tools = self.workflow.plan(state, discovery_mode=discovery_mode)
         state.plans.append(plan)
-        generation = self.backend.generate(self._model_history(state, plan), visible_tools)
+        generation = self.backend.generate(
+            self._model_history(state, plan, structured_plan), visible_tools
+        )
         state.raw_generations.append(generation.raw_content or generation.content)
         assistant_message, rejected_calls = self._validate_generation(
             generation,
@@ -149,6 +156,71 @@ class AgentCore:
             state.awaiting_confirmation = True
         state.decisions += 1
         return AgentTurn(assistant_message=assistant_message, rejected_calls=tuple(rejected_calls))
+
+    def _make_structured_plan(self, state: AgentState) -> StructuredPlan | None:
+        """Ask the model for a compact private plan during normal discovery.
+
+        Verify and recovery are controller-owned safety states, so they skip
+        this generation entirely. An invalid plan fails safely to read mode.
+        """
+
+        if not self.enable_structured_planning or self.workflow.phase(state) != "discover":
+            return None
+        observations = "\n".join(
+            f"- {'success' if observation.success else 'error'} {observation.tool_name}: "
+            f"{self._truncate(observation.summary, 320)}"
+            for observation in state.observations[-4:]
+        ) or "- none"
+        requests = "\n".join(
+            self._truncate(message.content, 600)
+            for message in state.messages
+            if message.role == "user"
+        ) or "- none"
+        planner_messages = [
+            Message(
+                role="system",
+                content=(
+                    "You are the private planner for a tool agent. Return exactly one JSON object, "
+                    "without markdown or explanation: {\"mode\": \"read\"|\"propose\", "
+                    "\"missing_facts\": [string, ...]}. Choose read whenever verified facts are "
+                    "still needed before proposing a state-changing operation. Choose propose only "
+                    "when the current request can be described using known facts. Never invent facts."
+                ),
+            ),
+            Message(
+                role="user",
+                content=f"User requests:\n{requests}\n\nObserved facts:\n{observations}",
+            ),
+        ]
+        generation = self.backend.generate(planner_messages, ())
+        structured_plan = self._parse_structured_plan(generation)
+        state.structured_plans.append(structured_plan)
+        return structured_plan
+
+    @staticmethod
+    def _parse_structured_plan(generation: Generation) -> StructuredPlan:
+        raw_content = generation.raw_content or generation.content
+        content = strip_qwen_thinking(generation.content)
+        decoder = json.JSONDecoder()
+        for start in (index for index, character in enumerate(content) if character == "{"):
+            try:
+                payload, _ = decoder.raw_decode(content[start:])
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict) or payload.get("mode") not in {"read", "propose"}:
+                continue
+            missing_facts = payload.get("missing_facts", [])
+            if not isinstance(missing_facts, list) or not all(
+                isinstance(fact, str) for fact in missing_facts
+            ):
+                continue
+            return StructuredPlan(
+                mode=payload["mode"],
+                missing_facts=tuple(fact.strip() for fact in missing_facts if fact.strip()),
+                raw_content=raw_content,
+                valid=True,
+            )
+        return StructuredPlan(mode="read", missing_facts=(), raw_content=raw_content, valid=False)
 
     @staticmethod
     def terminate(state: AgentState) -> None:
@@ -317,8 +389,17 @@ class AgentCore:
         elif value is not None:
             yield value
 
-    def _model_history(self, state: AgentState, plan: WorkflowPlan) -> list[Message]:
+    def _model_history(
+        self, state: AgentState, plan: WorkflowPlan, structured_plan: StructuredPlan | None = None
+    ) -> list[Message]:
         recent_messages = state.messages[-self.MAX_PROMPT_MESSAGES :]
+        planner_context = ""
+        if structured_plan is not None:
+            planner_context = (
+                f" planner_mode={structured_plan.mode}; "
+                f"missing_facts={list(structured_plan.missing_facts)}; "
+                f"planner_valid={structured_plan.valid};"
+            )
         plan_message = Message(
             role="system",
             content=(
@@ -326,6 +407,7 @@ class AgentCore:
                 f"phase={plan.phase}; observations={plan.observation_count}; "
                 f"candidate_tools={list(plan.candidate_tools)}; "
                 f"explicit_confirmation_required_for_writes={plan.requires_confirmation}. "
+                f"{planner_context}"
                 "Choose the next useful action from the candidate tools."
             ),
         )

@@ -64,6 +64,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--max-generation-seconds", type=float, default=90.0)
     parser.add_argument("--enable-thinking", action="store_true")
+    parser.add_argument(
+        "--disable-structured-planning",
+        action="store_true",
+        help="Run the PAOV-v1 ablation without the model-generated private plan.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/retail_baseline"))
     parser.add_argument(
@@ -137,6 +142,7 @@ def task_record(task: Any, simulation: Any, agent_state: Any) -> dict[str, Any]:
         "raw_model_generations": agent_state.raw_generations,
         "workflow": {
             "plans": [asdict(plan) for plan in agent_state.plans],
+            "structured_plans": [asdict(plan) for plan in agent_state.structured_plans],
             "observations": [asdict(observation) for observation in agent_state.observations],
         },
         "simulation": simulation.model_dump(mode="json"),
@@ -153,7 +159,11 @@ def main() -> None:
         "seed": args.seed,
         "task_ids": [task.id for task in tasks],
         "judge_llm": args.judge_llm,
-        "agent_architecture": "paov_v1_evidence_recovery",
+        "agent_architecture": (
+            "paov_v1_evidence_recovery"
+            if args.disable_structured_planning
+            else "paov_v2_structured_planning"
+        ),
         "candidate_tools": args.candidate_tools,
         "selection": "explicit" if args.task_ids else args.selection,
     }
@@ -193,6 +203,7 @@ def main() -> None:
             backend=backend,
             max_decisions=args.max_decisions,
             candidate_tool_limit=args.candidate_tools,
+            enable_structured_planning=not args.disable_structured_planning,
         )
         user = UserSimulator(
             llm=args.user_llm,

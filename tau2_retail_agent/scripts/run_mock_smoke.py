@@ -23,6 +23,14 @@ class DeterministicMockBackend:
     """Exercises generic confirmation, write, verification, and final reply."""
 
     def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> Generation:
+        if any(
+            message.role == "system" and "private planner" in message.content.lower()
+            for message in messages
+        ):
+            # PAOV-v2 asks for this private, typed decision before a normal
+            # discover turn. The rest of this fake backend remains a real
+            # confirmation/write/verify exercise.
+            return Generation(content='{"mode":"propose","missing_facts":[]}')
         tool_result_count = sum(message.role == "tool" for message in messages)
         if tool_result_count >= 2:
             return Generation(content="The task was created successfully.")

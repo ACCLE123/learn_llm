@@ -39,6 +39,9 @@ def print_trace(trace: list[dict[str, object]], state: object) -> None:
                 "trace": trace,
                 "raw_model_generations": getattr(state, "raw_generations", []),
                 "workflow_plans": [asdict(plan) for plan in getattr(state, "plans", [])],
+                "structured_plans": [
+                    asdict(plan) for plan in getattr(state, "structured_plans", [])
+                ],
             },
             ensure_ascii=False,
             indent=2,
