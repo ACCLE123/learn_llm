@@ -50,9 +50,27 @@ class FailureAnalysisTests(unittest.TestCase):
             ]
         )
         self.assertEqual(report["tasks_analyzed"], 2)
-        self.assertEqual(report["label_counts"]["success"], 1)
+        self.assertEqual(report["label_counts"]["benchmark_reward_success"], 1)
+        self.assertEqual(report["label_counts"]["behavioral_success"], 1)
         self.assertEqual(report["label_counts"]["tool_execution_error"], 1)
         self.assertEqual(report["label_counts"]["communication_requirement_not_met"], 1)
+
+    def test_distinguishes_reward_from_clean_execution(self) -> None:
+        report = build_failure_report(
+            [
+                {
+                    "task_id": "a",
+                    "reward": 1.0,
+                    "termination_reason": "user_stop",
+                    "tool_result_errors": 2,
+                    "simulation": {"messages": []},
+                }
+            ]
+        )
+
+        self.assertEqual(report["benchmark_reward_successes"], 1)
+        self.assertEqual(report["behavioral_successes"], 0)
+        self.assertEqual(report["label_counts"]["reward_success_with_execution_issues"], 1)
 
 
 if __name__ == "__main__":

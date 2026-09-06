@@ -31,6 +31,7 @@ class ToolRetriever:
             tool for tool in self.tools if allowed_kinds is None or tool.kind in allowed_kinds
         ]
         if not candidates:
+            # Read-only workflow phases bypass this fallback and fail closed.
             candidates = list(self.tools)
         query_tokens = _tokens(query)
 
@@ -61,11 +62,18 @@ class PlanActObserveVerify:
         self.candidate_limit = candidate_limit
 
     def plan(self, state: AgentState) -> tuple[WorkflowPlan, tuple[ToolSpec, ...]]:
-        phase = "verify" if state.verification_required else "act" if state.observations else "discover"
-        allowed_kinds: set[ToolKind] | None = {"read"} if phase == "verify" else None
-        visible_tools = self.retriever.select(
-            self._query(state), allowed_kinds=allowed_kinds, limit=self.candidate_limit
-        )
+        phase = self._phase(state)
+        read_tools = tuple(tool for tool in self.tools if tool.kind == "read")
+        if phase in {"verify", "recover"}:
+            # A tool agent must not fall back to write tools when verification
+            # or error recovery has no read capability.
+            visible_tools = read_tools
+        elif phase == "discover" and self._has_successful_read(state):
+            # Evidence collection and recovery favor recall over lexical Top-K
+            # precision. A read-only schema set cannot mutate the environment.
+            visible_tools = read_tools
+        else:
+            visible_tools = self.retriever.select(self._query(state), limit=self.candidate_limit)
         plan = WorkflowPlan(
             phase=phase,
             candidate_tools=tuple(tool.name for tool in visible_tools),
@@ -73,6 +81,20 @@ class PlanActObserveVerify:
             observation_count=len(state.observations),
         )
         return plan, visible_tools
+
+    @staticmethod
+    def _phase(state: AgentState) -> WorkflowPhase:
+        if state.verification_required:
+            return "verify"
+        if state.recovery_required:
+            return "recover"
+        if state.awaiting_confirmation:
+            return "act"
+        return "discover"
+
+    @staticmethod
+    def _has_successful_read(state: AgentState) -> bool:
+        return any(observation.success and observation.tool_kind == "read" for observation in state.observations)
 
     @staticmethod
     def _query(state: AgentState) -> str:

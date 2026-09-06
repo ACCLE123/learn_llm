@@ -153,7 +153,7 @@ def main() -> None:
         "seed": args.seed,
         "task_ids": [task.id for task in tasks],
         "judge_llm": args.judge_llm,
-        "agent_architecture": "plan_act_observe_verify",
+        "agent_architecture": "paov_v1_evidence_recovery",
         "candidate_tools": args.candidate_tools,
         "selection": "explicit" if args.task_ids else args.selection,
     }
@@ -219,6 +219,7 @@ def main() -> None:
         )
 
     rewards = [record["reward"] for record in records if record["reward"] is not None]
+    failure_report = build_failure_report(records)
     summary = {
         **selection,
         "model": args.model,
@@ -226,10 +227,12 @@ def main() -> None:
         "tasks_completed": len(records),
         "mean_reward": sum(rewards) / len(rewards) if rewards else None,
         "success_rate": sum(reward == 1.0 for reward in rewards) / len(rewards) if rewards else None,
+        "behavioral_success_rate": (
+            failure_report["behavioral_successes"] / len(records) if records else None
+        ),
         "total_tool_result_errors": sum(record["tool_result_errors"] for record in records),
         "run_dir": str(run_dir),
     }
-    failure_report = build_failure_report(records)
     (run_dir / "failure_report.json").write_text(
         json.dumps(failure_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

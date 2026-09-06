@@ -10,9 +10,10 @@ adding reinforcement learning:
 ```text
 user or tool message
   -> Observe: compact tool-attributed facts
-  -> Plan: retrieve a small relevant tool subset from schemas
+  -> Plan: retrieve a relevant tool subset from schemas
   -> Act: Qwen chooses text or a typed tool call
   -> Verify: require a read after a successful write
+  -> Recover: inspect facts after an error before another write
   -> τ² environment -> next tool/user message
 ```
 
@@ -27,8 +28,10 @@ user or tool message
   model, while tests use a deterministic fake backend.
 - Validate tool names and arguments before an environment receives a call.
 - Classify τ² tools as read/write/think/generic from their declared metadata.
-- Require explicit confirmation before write actions and a read-only verify
-  phase after them.
+- Require explicit confirmation before write actions, consume that confirmation
+  after one write decision, and use a read-only verify phase after success.
+- Require write arguments to be grounded in user input or successful tool
+  observations; errors enter a read-only recovery phase.
 - Stop safely at a configured turn limit and expose each step for tracing.
 
 ### Later phases
@@ -55,17 +58,26 @@ runtime, evaluator, and decoding configuration recorded. Do not overwrite that
 file. The primary experiment model is Qwen3-1.7B; retain Qwen3-4B only for a
 later migration check of the best 1.7B agent workflow.
 
+`baselines/qwen3_1.7b_paov_v0.json` freezes the first diverse eight-task
+Qwen3-1.7B development result. Its reported τ² success rate was `1/8`, but
+its conservative behavioral-success rate was `0/8` because the reward-success
+trajectory still contained tool errors. This distinction is retained in all
+new reports.
+
 The current agent is a generic `Plan-Act-Observe-Verify` workflow, not a
 task-specific script:
 
 1. Tool schemas and τ² metadata are converted into read/write/think/generic
    specs.
-2. A lexical retriever selects the top candidate schemas for the current user
-   request and recent observations.
-3. Qwen plans and acts only within that candidate set.
-4. Environment results become compact observations.
-5. Writes require explicit confirmation; their next decision is restricted to
-   read tools for verification.
+2. Initial action selection uses schema retrieval; after a successful read,
+   evidence collection exposes all read-only schemas to avoid lexical Top-K
+   omissions.
+3. Writes require user confirmation and arguments whose values appear in the
+   user request or a successful observation.
+4. A write consumes its confirmation. Successful writes enter Verify; failed
+   reads or writes enter Recover, where only read tools are exposed.
+5. Verify and Recover fail closed when no read tool exists; they never fall
+   back to a state-changing tool.
 
 The workflow never contains task IDs, product names, order formats, or desired
 benchmark actions. This makes it suitable for comparisons across Retail task
@@ -147,7 +159,10 @@ PYTHONPATH=src python scripts/analyze_retail_failures.py \
 ```
 
 The report has non-exclusive labels such as generation stop, no tool action,
-tool execution error, environment-goal failure, and communication failure.
+tool execution error, environment-goal failure, and communication failure. It
+also distinguishes `benchmark_reward_success` from conservative
+`behavioral_success` so a reward with tool errors is not treated as a clean
+agent completion.
 
 For workflow development, avoid repeatedly tuning only the leading tasks. This
 selects a reproducible train subset that maximizes coverage of distinct τ²

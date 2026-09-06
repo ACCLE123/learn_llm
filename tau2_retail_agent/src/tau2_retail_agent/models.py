@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 MessageRole = Literal["system", "user", "assistant", "tool"]
 ToolKind = Literal["read", "write", "think", "generic"]
-WorkflowPhase = Literal["discover", "act", "verify"]
+WorkflowPhase = Literal["discover", "act", "verify", "recover"]
 
 
 @dataclass(frozen=True)
@@ -108,6 +108,7 @@ class AgentState:
     plans: list[WorkflowPlan] = field(default_factory=list)
     awaiting_confirmation: bool = False
     verification_required: bool = False
+    recovery_required: bool = False
 
     @property
     def history(self) -> list[Message]:

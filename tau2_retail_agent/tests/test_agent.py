@@ -108,6 +108,116 @@ class AgentCoreTests(unittest.TestCase):
         self.assertEqual([tool.name for tool in visible_tools], ["get_record"])
         self.assertEqual(verify_turn.assistant_message.tool_calls[0].name, "get_record")
 
+    def test_consumes_confirmation_after_a_write(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(content="Please confirm that you want to proceed."),
+                Generation(tool_calls=(ToolCall(name="change_record", arguments={}),)),
+            ]
+        )
+        agent = AgentCore(backend, [tool("change_record", kind="write")], "Ask first.")
+        state = agent.get_init_state()
+
+        agent.generate_next_message(Message(role="user", content="Change my record."), state)
+        agent.generate_next_message(Message(role="user", content="Yes, proceed."), state)
+
+        self.assertFalse(state.awaiting_confirmation)
+
+    def test_discover_phase_expands_to_all_read_tools_after_fact_collection(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(tool_calls=(ToolCall(name="get_order", arguments={}),)),
+                Generation(content="Please confirm the proposed update."),
+            ]
+        )
+        agent = AgentCore(
+            backend,
+            [
+                tool("get_order", kind="read"),
+                tool("get_catalog", kind="read"),
+                tool("change_record", kind="write"),
+            ],
+            "Gather facts before changes.",
+            candidate_tool_limit=1,
+        )
+        state = agent.get_init_state()
+
+        first = agent.generate_next_message(Message(role="user", content="Find my order."), state)
+        agent.generate_next_message(
+            Message(role="tool", content="order found", tool_call_id=first.assistant_message.tool_calls[0].call_id),
+            state,
+        )
+
+        self.assertEqual(state.plans[-1].phase, "discover")
+        _, visible_tools = backend.requests[-1]
+        self.assertEqual([candidate.name for candidate in visible_tools], ["get_order", "get_catalog"])
+
+    def test_ungrounded_write_enters_read_only_recovery(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(tool_calls=(ToolCall(name="change_record", arguments={}),)),
+                Generation(content="I will inspect the record."),
+            ]
+        )
+        agent = AgentCore(
+            backend,
+            [
+                ToolSpec(
+                    name="change_record",
+                    description="Change a record by ID.",
+                    parameters={"type": "object", "properties": {"record_id": {"type": "string"}}},
+                    kind="write",
+                ),
+                tool("get_record", kind="read"),
+            ],
+            "Use facts.",
+        )
+        state = agent.get_init_state()
+        backend.generations[0] = Generation(
+            tool_calls=(ToolCall(name="change_record", arguments={"record_id": "invented"}),)
+        )
+
+        rejected = agent.generate_next_message(Message(role="user", content="Change my record."), state)
+        agent.generate_next_message(Message(role="user", content="Please continue."), state)
+
+        self.assertIn("not grounded", rejected.rejected_calls[0].reason)
+        self.assertTrue(state.recovery_required)
+        self.assertEqual(state.plans[-1].phase, "recover")
+        _, visible_tools = backend.requests[-1]
+        self.assertEqual([candidate.name for candidate in visible_tools], ["get_record"])
+
+    def test_failed_write_clears_confirmation_and_enters_recovery(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(content="Please confirm that you want to proceed."),
+                Generation(tool_calls=(ToolCall(name="change_record", arguments={}),)),
+                Generation(content="I will inspect the current record."),
+            ]
+        )
+        agent = AgentCore(
+            backend,
+            [tool("change_record", kind="write"), tool("get_record", kind="read")],
+            "Use facts.",
+        )
+        state = agent.get_init_state()
+
+        agent.generate_next_message(Message(role="user", content="Change my record."), state)
+        write_turn = agent.generate_next_message(Message(role="user", content="Yes, proceed."), state)
+        agent.generate_next_message(
+            Message(
+                role="tool",
+                content="Error: update rejected",
+                tool_call_id=write_turn.assistant_message.tool_calls[0].call_id,
+            ),
+            state,
+        )
+
+        self.assertFalse(state.awaiting_confirmation)
+        self.assertTrue(state.recovery_required)
+        self.assertEqual(state.plans[-1].phase, "recover")
+        _, visible_tools = backend.requests[-1]
+        self.assertEqual([candidate.name for candidate in visible_tools], ["get_record"])
+
     def test_retries_verification_when_model_claims_completion_without_a_read(self) -> None:
         backend = ScriptedBackend(
             [

@@ -69,7 +69,10 @@ class AgentCore:
                     "for information that is missing from the conversation or observations. Before "
                     "any state-changing tool call, explain the proposed outcome and obtain explicit "
                     "user confirmation. After a state-changing tool succeeds, use a read tool to "
-                    "verify the result before claiming completion. Keep user-facing replies concise."
+                    "verify the result before claiming completion. Ground every write argument in "
+                    "the user request or a successful tool result. When a tool reports an error, "
+                    "inspect current facts with a read tool before proposing another write. Keep "
+                    "user-facing replies concise."
                 ),
             ),
             Message(role="system", content=f"Domain policy:\n{self.domain_policy}"),
@@ -105,7 +108,10 @@ class AgentCore:
             visible_tools=visible_tools,
             decision_index=state.decisions + 1,
         )
-        if plan.phase == "verify" and not assistant_message.tool_calls:
+        if any("not grounded" in rejection.reason for rejection in rejected_calls):
+            state.recovery_required = True
+            state.awaiting_confirmation = False
+        if plan.phase == "verify" and visible_tools and not assistant_message.tool_calls:
             for _ in range(self.MAX_VERIFICATION_REPAIR_ATTEMPTS):
                 retry = self.backend.generate(
                     [
@@ -129,6 +135,15 @@ class AgentCore:
                     role="assistant",
                     content="I could not verify the update, so I cannot confirm that it completed.",
                 )
+        elif plan.phase == "verify" and not visible_tools:
+            assistant_message = Message(
+                role="assistant",
+                content="I could not verify the update because no read tool is available.",
+            )
+        if any(self.tools_by_name[call.name].kind == "write" for call in assistant_message.tool_calls):
+            # Confirmation authorizes one concrete write decision, not an
+            # unbounded sequence of later writes.
+            state.awaiting_confirmation = False
         state.messages.append(assistant_message)
         if assistant_message.content and is_confirmation_request(assistant_message.content):
             state.awaiting_confirmation = True
@@ -154,10 +169,20 @@ class AgentCore:
                     summary=self._compact_tool_result(message.content),
                 )
             )
-            if tool and tool.kind == "write":
+            if not tool:
+                continue
+            if not success:
+                state.recovery_required = True
+                state.awaiting_confirmation = False
+                if tool.kind == "write":
+                    state.verification_required = False
+            elif tool.kind == "write":
+                state.recovery_required = False
                 state.verification_required = True
-            elif tool and tool.kind == "read" and state.verification_required:
-                state.verification_required = False
+            elif tool.kind == "read":
+                state.recovery_required = False
+                if state.verification_required:
+                    state.verification_required = False
 
     @staticmethod
     def _tool_name_for_result(message: Message, history: Iterable[Message]) -> str | None:
@@ -196,6 +221,13 @@ class AgentCore:
                         reason="A successful state-changing action must be verified with a read tool.",
                     )
                 )
+            elif tool.kind == "write" and not self._write_arguments_are_grounded(call, state):
+                rejected.append(
+                    ToolValidationError(
+                        call=call,
+                        reason="Write arguments are not grounded in user input or successful tool observations.",
+                    )
+                )
             elif tool.kind == "write" and not self._write_is_confirmed(state):
                 rejected.append(
                     ToolValidationError(
@@ -218,11 +250,13 @@ class AgentCore:
             requires_confirmation = any(
                 "require explicit user confirmation" in rejection.reason for rejection in rejected
             )
-            content = (
-                "I need to confirm the proposed change with you before processing it."
-                if requires_confirmation
-                else "I need to select a valid available tool before proceeding."
-            )
+            requires_evidence = any("not grounded" in rejection.reason for rejection in rejected)
+            if requires_evidence:
+                content = "I need to look up verified information before proposing that change."
+            elif requires_confirmation:
+                content = "I need to confirm the proposed change with you before processing it."
+            else:
+                content = "I need to select a valid available tool before proceeding."
         else:
             content = strip_qwen_thinking(generation.content)
         return Message(role="assistant", content=content, tool_calls=tuple(accepted)), rejected
@@ -255,6 +289,33 @@ class AgentCore:
             "",
         )
         return state.awaiting_confirmation and is_explicit_confirmation(latest_user)
+
+    @staticmethod
+    def _write_arguments_are_grounded(call: ToolCall, state: AgentState) -> bool:
+        """Require write values to be present in user input or successful observations.
+
+        This is a provider- and domain-neutral provenance check. It prevents a
+        model from inventing identifiers while still allowing a user to supply
+        an explicit value directly.
+        """
+
+        sources = [message.content.lower() for message in state.messages if message.role == "user"]
+        sources.extend(
+            observation.summary.lower() for observation in state.observations if observation.success
+        )
+        source_text = "\n".join(sources)
+        return all(str(value).lower() in source_text for value in AgentCore._argument_values(call.arguments))
+
+    @staticmethod
+    def _argument_values(value: object) -> Iterable[object]:
+        if isinstance(value, dict):
+            for child in value.values():
+                yield from AgentCore._argument_values(child)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                yield from AgentCore._argument_values(child)
+        elif value is not None:
+            yield value
 
     def _model_history(self, state: AgentState, plan: WorkflowPlan) -> list[Message]:
         recent_messages = state.messages[-self.MAX_PROMPT_MESSAGES :]

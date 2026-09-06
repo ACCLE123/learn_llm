@@ -1,0 +1,31 @@
+{
+  "name": "Qwen3-1.7B PAOV-v0 diverse Retail development baseline",
+  "timestamp_local": "2026-09-06T16:15:22",
+  "source_run_dir": "artifacts/retail_baseline/20260906_161522",
+  "model": "Qwen/Qwen3-1.7B loaded from models/Qwen3-1.7B",
+  "device": "mps:0",
+  "agent_architecture": "plan_act_observe_verify",
+  "candidate_tools": 4,
+  "split": "train",
+  "seed": 42,
+  "task_ids": ["0", "1", "2", "3", "10", "21", "22", "54"],
+  "user_llm": "deepseek/deepseek-chat",
+  "judge_llm": "deepseek/deepseek-chat",
+  "max_new_tokens": 128,
+  "max_generation_seconds": 60,
+  "max_decisions": 16,
+  "max_steps": 32,
+  "reported_mean_reward": 0.125,
+  "reported_success_rate": 0.125,
+  "behavioral_success_rate": 0.0,
+  "tool_result_errors": 29,
+  "mean_duration_seconds": 92.76552571349748,
+  "termination_counts": {
+    "max_steps": 5,
+    "user_stop": 3
+  },
+  "notes": [
+    "The benchmark reported one reward-success task, but it contained tool execution errors.",
+    "Behavioral success is conservatively defined as reward 1, zero tool errors, and no budget termination."
+  ]
+}
