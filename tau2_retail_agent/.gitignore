@@ -3,3 +3,5 @@ __pycache__/
 .venv/
 artifacts/
 traces/
+models/
+vendor/tau2-bench/

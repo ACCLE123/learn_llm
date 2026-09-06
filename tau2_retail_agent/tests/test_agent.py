@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -46,6 +47,7 @@ class AgentCoreTests(unittest.TestCase):
         turn = agent.generate_next_message(Message(role="user", content="Where is order o-1?"), state)
 
         self.assertEqual(turn.assistant_message.tool_calls[0].name, "get_order")
+        self.assertEqual(turn.assistant_message.tool_calls[0].call_id, "call_1_1")
         self.assertEqual(state.decisions, 1)
         self.assertEqual(state.messages[0].role, "user")
         self.assertEqual(state.messages[1].role, "assistant")
@@ -75,6 +77,88 @@ class AgentCoreTests(unittest.TestCase):
         with self.assertRaises(TurnLimitReached):
             agent.generate_next_message(Message(role="user", content="Any update?"), state)
         self.assertTrue(state.terminated)
+
+    def test_appends_multiple_tool_results_before_deciding(self) -> None:
+        backend = ScriptedBackend([Generation(content="Both updates are complete.")])
+        agent = AgentCore(backend, [order_lookup()], "Report completed changes.")
+        state = agent.get_init_state()
+
+        agent.generate_after_messages(
+            [
+                Message(role="tool", content="First tool result", tool_call_id="call_1_1"),
+                Message(role="tool", content="Second tool result", tool_call_id="call_1_2"),
+            ],
+            state,
+        )
+
+        prompt, _ = backend.requests[0]
+        self.assertEqual(prompt[-2].content, "First tool result")
+        self.assertEqual(prompt[-1].content, "Second tool result")
+
+    def test_tool_call_output_never_mixes_text_and_action(self) -> None:
+        backend = ScriptedBackend(
+            [
+                Generation(
+                    content="I will look it up.",
+                    tool_calls=(ToolCall(name="get_order", arguments={"order_id": "o-1"}),),
+                )
+            ]
+        )
+        agent = AgentCore(backend, [order_lookup()], "Use tools for facts.")
+        state = agent.get_init_state()
+
+        turn = agent.generate_next_message(Message(role="user", content="Find o-1"), state)
+
+        self.assertEqual(turn.assistant_message.content, "")
+        self.assertEqual(turn.assistant_message.tool_calls[0].call_id, "call_1_1")
+
+    def test_hides_thinking_but_keeps_raw_generation_in_state(self) -> None:
+        raw = "<think>private chain of thought</think>\nThe order is confirmed."
+        backend = ScriptedBackend([Generation(content=raw, raw_content=raw)])
+        agent = AgentCore(backend, [order_lookup()], "Respond clearly.")
+        state = agent.get_init_state()
+
+        turn = agent.generate_next_message(Message(role="user", content="Status?"), state)
+
+        self.assertEqual(turn.assistant_message.content, "The order is confirmed.")
+        self.assertEqual(state.raw_generations, [raw])
+
+    def test_compacts_model_context_without_changing_auditable_history(self) -> None:
+        backend = ScriptedBackend([Generation(content="Done.")])
+        agent = AgentCore(backend, [order_lookup()], "Follow policy.")
+        state = agent.get_init_state(
+            [
+                Message(role="assistant", content="x" * 500),
+                Message(
+                    role="tool",
+                    content=json.dumps(
+                        {
+                            "order_id": "o-1",
+                            "user_id": "u-1",
+                            "address": {"address1": "private"},
+                            "items": [
+                                {
+                                    "name": "Keyboard",
+                                    "product_id": "p-1",
+                                    "item_id": "i-1",
+                                    "price": 10,
+                                    "options": {"switch": "linear"},
+                                }
+                            ],
+                        }
+                    ),
+                    tool_call_id="call_1_1",
+                )
+            ]
+        )
+
+        agent.generate_next_message(Message(role="user", content="Continue."), state)
+
+        prompt, _ = backend.requests[0]
+        self.assertLessEqual(len(prompt[-3].content), agent.MAX_ASSISTANT_CONTEXT_CHARS + 40)
+        self.assertIn('"product_id":"p-1"', prompt[-2].content)
+        self.assertNotIn("address1", prompt[-2].content)
+        self.assertEqual(len(state.messages[0].content), 500)
 
 
 class QwenParsingTests(unittest.TestCase):

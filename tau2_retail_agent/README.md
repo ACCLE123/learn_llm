@@ -52,10 +52,88 @@ cd tau2_retail_agent
 python3 -m unittest discover -s tests -v
 ```
 
+Run the τ² integration tests and the real mock-environment smoke test with the
+dedicated environment:
+
+```bash
+conda activate tau2-agent
+cd /Users/yangqi/Code2/GRPO/tau2_retail_agent
+PYTHONPATH=src python -m unittest discover -s tests -v
+PYTHONPATH=src python scripts/run_mock_smoke.py
+```
+
+The smoke test uses a deterministic backend, but invokes the official τ² mock
+tools and feeds their real results back into the agent. It is the prerequisite
+for replacing that backend with `TransformersQwenBackend`.
+
+Run the real Qwen smoke test after the deterministic check passes:
+
+```bash
+# Download once in a normal terminal; it can take a while on a slow network.
+hf download Qwen/Qwen3-4B --local-dir models/Qwen3-4B
+
+# Then run with the local checkpoint.
+PYTHONPATH=src python scripts/run_qwen_mock.py --model models/Qwen3-4B
+```
+
+The first run downloads approximately 8.04 GB of model weights. The backend
+uses CUDA when available and otherwise moves to MPS when PyTorch exposes it;
+CPU remains a functional but slow fallback.
+
+## Retail development baseline
+
+The first Retail baseline uses the official train split and always selects the
+first five task IDs in order. Inspect that fixed selection without loading Qwen
+or calling a remote service:
+
+```bash
+PYTHONPATH=src python scripts/run_retail_baseline.py --dry-run
+```
+
+Retail uses τ²'s LLM user simulator, so an actual run requires credentials for
+the LiteLLM provider behind the explicitly supplied user model. With DeepSeek:
+
+```bash
+export DEEPSEEK_API_KEY="your_api_key"
+PYTHONPATH=src python scripts/run_retail_baseline.py \
+  --model models/Qwen3-4B \
+  --user-llm deepseek/deepseek-chat
+```
+
+Each task's sanitized τ² simulation, raw Qwen completions, reward, duration,
+and tool-result errors are written to a timestamped directory below
+`artifacts/retail_baseline/`.
+
+Qwen thinking is disabled by default so tool calls arrive promptly. Add
+`--enable-thinking` only when deliberately comparing a reasoning-enabled run.
+Each local Qwen decision has a 90-second decoding budget by default; override
+it with `--max-generation-seconds` when profiling slower hardware.
+
+## τ² runtime
+
+τ² keeps its task data next to its source tree, so the local checkout lives at
+`vendor/tau2-bench/` and is intentionally ignored by this repository. The
+current integration was verified against commit
+`672227c6b6676edc20d57ea53b7000262aae77b9`.
+
+To reproduce the runtime on a fresh machine:
+
+```bash
+conda create -n tau2-agent python=3.12 -y
+conda activate tau2-agent
+git clone https://github.com/sierra-research/tau2-bench.git vendor/tau2-bench
+git -C vendor/tau2-bench checkout 672227c6b6676edc20d57ea53b7000262aae77b9
+python -m pip install -e vendor/tau2-bench gymnasium torch 'transformers>=4.51.0'
+```
+
 For a real τ² run, use the benchmark's supported setup (`uv sync` from its
 repository) and install the optional model dependencies in the same Python
 environment. The exact Qwen checkpoint, decoding parameters, τ² version, and
 user-simulator configuration must be frozen before recording a baseline.
+
+The repository's dedicated runtime is the `tau2-agent` Conda environment. It
+uses Python 3.12 because τ² v1 requires Python `>=3.12,<3.14`; the existing
+`transformers` environment remains untouched.
 
 ## Current acceptance criteria
 

@@ -53,6 +53,7 @@ class Generation:
 
     content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
+    raw_content: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ class AgentState:
     messages: list[Message] = field(default_factory=list)
     decisions: int = 0
     terminated: bool = False
+    raw_generations: list[str] = field(default_factory=list)
 
     @property
     def history(self) -> list[Message]:
